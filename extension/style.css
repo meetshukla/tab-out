@@ -5,29 +5,42 @@
    ============================================================ */
 
 :root {
-  --ink: #1a1613;
-  --paper: #f8f5f0;
-  --warm-gray: #e8e2da;
-  --muted: #9a918a;
-  --accent-amber: #c8713a;
-  --accent-sage: #5a7a62;
-  --accent-slate: #5a6b7a;
-  --accent-rose: #b35a5a;
-  --status-active: #3d7a4a;
-  --status-cooling: #b8892e;
-  --status-abandoned: #b35a5a;
-  --card-bg: #fffdf9;
-  --shadow: rgba(26, 22, 19, 0.06);
+  color-scheme: dark;
+  --ink: #f3ede5;
+  --paper: #0d0c0b;
+  --warm-gray: #2a2520;
+  --muted: #9b9389;
+  --accent-amber: #d89b66;
+  --accent-sage: #7fa189;
+  --accent-slate: #8191a8;
+  --accent-rose: #cf7878;
+  --status-active: #7ab08a;
+  --status-cooling: #d5b05f;
+  --status-abandoned: #cf7878;
+  --card-bg: #171411;
+  --shadow: rgba(0, 0, 0, 0.28);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+html,
 body {
   font-family: 'DM Sans', sans-serif;
-  background: var(--paper);
+  width: 440px;
+  min-width: 440px;
+  max-width: 440px;
+  min-height: 560px;
+  background:
+    radial-gradient(circle at top left, rgba(216, 155, 102, 0.12), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(127, 161, 137, 0.08), transparent 32%),
+    var(--paper);
   color: var(--ink);
-  min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+}
+
+body {
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* Subtle paper texture */
@@ -43,15 +56,18 @@ body::before {
 .container {
   position: relative;
   z-index: 1;
-  max-width: 960px;
+  width: 440px;
+  min-width: 440px;
+  max-width: 440px;
+  max-width: 100%;
   margin: 0 auto;
-  padding: 48px 32px 80px;
+  padding: 16px 16px 20px;
 }
 
 /* When the saved-for-later sidebar is open, expand the container
    so the tab grid still has room for 2-3 columns */
 .container:has(.dashboard-columns) {
-  max-width: 1300px;
+  max-width: 100%;
 }
 
 /* ---- Header ---- */
@@ -59,15 +75,15 @@ header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 48px;
-  padding-bottom: 24px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
   border-bottom: 1px solid var(--warm-gray);
 }
 
 .header-left h1 {
   font-family: 'Newsreader', serif;
   font-weight: 300;
-  font-size: 28px;
+  font-size: 24px;
   letter-spacing: -0.5px;
   color: var(--ink);
   margin-bottom: 4px;
@@ -83,20 +99,23 @@ header {
 
 /* ---- Tab cleanup banner ---- */
 .tab-cleanup-banner {
-  background: linear-gradient(135deg, rgba(200, 113, 58, 0.04), rgba(200, 113, 58, 0.09));
-  border: 1px solid rgba(200, 113, 58, 0.18);
+  background: linear-gradient(135deg, rgba(216, 155, 102, 0.1), rgba(216, 155, 102, 0.06));
+  border: 1px solid rgba(216, 155, 102, 0.2);
   border-radius: 8px;
-  padding: 16px 24px;
+  padding: 14px 16px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .tab-cleanup-left {
   display: flex;
   align-items: center;
   gap: 16px;
+  min-width: 0;
 }
 
 .tab-cleanup-icon {
@@ -120,6 +139,7 @@ header {
   font-size: 13px;
   color: var(--ink);
   line-height: 1.5;
+  min-width: 0;
 }
 
 .tab-cleanup-text strong {
@@ -132,9 +152,9 @@ header {
   font-weight: 600;
   padding: 8px 20px;
   border-radius: 6px;
-  border: none;
-  background: var(--accent-amber);
-  color: white;
+  border: 1px solid rgba(216, 155, 102, 0.3);
+  background: rgba(216, 155, 102, 0.12);
+  color: var(--ink);
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
@@ -188,9 +208,10 @@ header {
 .section-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 20px;
-  margin-top: 8px;
+  margin-bottom: 14px;
+  margin-top: 4px;
 }
 
 .section-header h2 {
@@ -213,21 +234,21 @@ header {
   color: var(--muted);
   font-weight: 500;
   letter-spacing: 0.5px;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 /* ---- Mission Cards ---- */
 .missions {
-  columns: 280px;
-  column-gap: 12px;
-  margin-bottom: 40px;
+  columns: 1;
+  column-gap: 0;
+  margin-bottom: 18px;
 }
 
 .mission-card {
   background: var(--card-bg);
   border: 1px solid var(--warm-gray);
   border-radius: 8px;
-  padding: 16px 18px;
+  padding: 14px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -255,7 +276,7 @@ header {
 .mission-card.has-neutral-bar::before { background: var(--warm-gray); }
 
 .mission-card:hover {
-  box-shadow: 0 4px 20px var(--shadow);
+  box-shadow: 0 10px 30px var(--shadow);
   transform: translateY(-1px);
 }
 
@@ -493,6 +514,7 @@ header {
 /* ---- Actions row ---- */
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
 }
@@ -524,8 +546,8 @@ header {
 }
 
 .action-btn.primary {
-  background: var(--ink);
-  color: var(--paper);
+  background: rgba(243, 237, 229, 0.12);
+  color: var(--ink);
   border-color: var(--ink);
 }
 
@@ -567,17 +589,18 @@ header {
 /* ---- Toast notification ---- */
 .toast {
   position: fixed;
-  bottom: 32px;
+  bottom: 20px;
   left: 50%;
   transform: translateX(-50%) translateY(80px);
-  background: var(--ink);
-  color: var(--paper);
+  background: rgba(243, 237, 229, 0.1);
+  color: var(--ink);
   font-family: 'DM Sans', sans-serif;
   font-size: 13px;
   font-weight: 500;
   padding: 12px 24px;
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  border: 1px solid rgba(243, 237, 229, 0.14);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.28);
   z-index: 100;
   opacity: 0;
   transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
@@ -600,17 +623,19 @@ header {
 
 /* ---- Footer ---- */
 footer {
-  margin-top: 48px;
-  padding-top: 20px;
+  margin-top: 28px;
+  padding-top: 18px;
   border-top: 1px solid var(--warm-gray);
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
 }
 
 .footer-stats {
   display: flex;
-  gap: 32px;
+  gap: 18px;
 }
 
 .stat {
@@ -891,31 +916,33 @@ footer { animation: fadeUp 0.5s ease 0.65s both; }
 /* ---- Two-column layout ---- */
 .dashboard-columns {
   display: flex;
-  gap: 32px;
+  flex-direction: column;
+  gap: 18px;
   align-items: flex-start;
 }
 
 /* Open tabs column keeps the grid layout */
 .dashboard-columns .active-section {
   flex: 1;
-  min-width: 600px;
+  min-width: 0;
 }
 
 /* Saved for later column — fixed width on the right, scrolls independently */
 .deferred-column {
-  width: 280px;
+  width: 100%;
   flex-shrink: 0;
-  position: sticky;
-  top: 32px;
-  max-height: calc(100vh - 64px);
-  overflow-y: auto;
+  position: relative;
 }
 
-/* On narrow screens, stack vertically */
-@media (max-width: 800px) {
-  .dashboard-columns {
-    flex-direction: column;
+/* Popup-first responsive guard */
+@media (max-width: 460px) {
+  html,
+  body {
+    width: 100vw;
+    min-width: 100vw;
+    max-width: 100vw;
   }
+
   .deferred-column {
     width: 100%;
     position: static;

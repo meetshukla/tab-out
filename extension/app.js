@@ -25,6 +25,24 @@
 
 // All open tabs — populated by fetchOpenTabs()
 let openTabs = [];
+let lastGroupingSummary = { groups: 0, tabs: 0, skipped: 0 };
+const TAB_GROUP_COLORS = ['blue', 'cyan', 'green', 'orange', 'pink', 'purple', 'red', 'yellow', 'grey'];
+const POPUP_WIDTH = '440px';
+const POPUP_MIN_HEIGHT = '560px';
+
+function forcePopupFrame() {
+  document.documentElement.style.width = POPUP_WIDTH;
+  document.documentElement.style.minWidth = POPUP_WIDTH;
+  document.documentElement.style.maxWidth = POPUP_WIDTH;
+  document.documentElement.style.minHeight = POPUP_MIN_HEIGHT;
+
+  document.body.style.width = POPUP_WIDTH;
+  document.body.style.minWidth = POPUP_WIDTH;
+  document.body.style.maxWidth = POPUP_WIDTH;
+  document.body.style.minHeight = POPUP_MIN_HEIGHT;
+}
+
+forcePopupFrame();
 
 /**
  * fetchOpenTabs()
@@ -34,19 +52,17 @@ let openTabs = [];
  */
 async function fetchOpenTabs() {
   try {
-    const extensionId = chrome.runtime.id;
-    // The new URL for this page is now index.html (not newtab.html)
-    const newtabUrl = `chrome-extension://${extensionId}/index.html`;
-
-    const tabs = await chrome.tabs.query({});
+    const tabs = await chrome.tabs.query({ currentWindow: true });
     openTabs = tabs.map(t => ({
       id:       t.id,
       url:      t.url,
       title:    t.title,
       windowId: t.windowId,
+      index:    t.index,
       active:   t.active,
-      // Flag Tab Out's own pages so we can detect duplicate new tabs
-      isTabOut: t.url === newtabUrl || t.url === 'chrome://newtab/',
+      pinned:   t.pinned,
+      groupId:  t.groupId,
+      isTabOut: false,
     }));
   } catch {
     // chrome.tabs API unavailable (shouldn't happen in an extension page)
@@ -78,10 +94,11 @@ async function closeTabsByUrls(urls) {
     }
   }
 
-  const allTabs = await chrome.tabs.query({});
+  const allTabs = await chrome.tabs.query({ currentWindow: true });
   const toClose = allTabs
     .filter(tab => {
       const tabUrl = tab.url || '';
+      if (tab.pinned) return false;
       if (tabUrl.startsWith('file://') && exactUrls.has(tabUrl)) return true;
       try {
         const tabHostname = new URL(tabUrl).hostname;
@@ -103,8 +120,8 @@ async function closeTabsByUrls(urls) {
 async function closeTabsExact(urls) {
   if (!urls || urls.length === 0) return;
   const urlSet = new Set(urls);
-  const allTabs = await chrome.tabs.query({});
-  const toClose = allTabs.filter(t => urlSet.has(t.url)).map(t => t.id);
+  const allTabs = await chrome.tabs.query({ currentWindow: true });
+  const toClose = allTabs.filter(t => !t.pinned && urlSet.has(t.url)).map(t => t.id);
   if (toClose.length > 0) await chrome.tabs.remove(toClose);
   await fetchOpenTabs();
 }
@@ -117,8 +134,7 @@ async function closeTabsExact(urls) {
  */
 async function focusTab(url) {
   if (!url) return;
-  const allTabs = await chrome.tabs.query({});
-  const currentWindow = await chrome.windows.getCurrent();
+  const allTabs = await chrome.tabs.query({ currentWindow: true });
 
   // Try exact URL match first
   let matches = allTabs.filter(t => t.url === url);
@@ -136,10 +152,8 @@ async function focusTab(url) {
 
   if (matches.length === 0) return;
 
-  // Prefer a match in a different window so it actually switches windows
-  const match = matches.find(t => t.windowId !== currentWindow.id) || matches[0];
+  const match = matches[0];
   await chrome.tabs.update(match.id, { active: true });
-  await chrome.windows.update(match.windowId, { focused: true });
 }
 
 /**
@@ -150,11 +164,11 @@ async function focusTab(url) {
  * keepOne=false → close all copies.
  */
 async function closeDuplicateTabs(urls, keepOne = true) {
-  const allTabs = await chrome.tabs.query({});
+  const allTabs = await chrome.tabs.query({ currentWindow: true });
   const toClose = [];
 
   for (const url of urls) {
-    const matching = allTabs.filter(t => t.url === url);
+    const matching = allTabs.filter(t => !t.pinned && t.url === url);
     if (keepOne) {
       const keep = matching.find(t => t.active) || matching[0];
       for (const tab of matching) {
@@ -169,32 +183,112 @@ async function closeDuplicateTabs(urls, keepOne = true) {
   await fetchOpenTabs();
 }
 
-/**
- * closeTabOutDupes()
- *
- * Closes all duplicate Tab Out new-tab pages except the current one.
- */
-async function closeTabOutDupes() {
-  const extensionId = chrome.runtime.id;
-  const newtabUrl = `chrome-extension://${extensionId}/index.html`;
-
-  const allTabs = await chrome.tabs.query({});
-  const currentWindow = await chrome.windows.getCurrent();
-  const tabOutTabs = allTabs.filter(t =>
-    t.url === newtabUrl || t.url === 'chrome://newtab/'
+function isGroupableTab(tab) {
+  const url = tab.url || '';
+  return (
+    !tab.pinned &&
+    !url.startsWith('chrome://') &&
+    !url.startsWith('chrome-extension://') &&
+    !url.startsWith('about:') &&
+    !url.startsWith('edge://') &&
+    !url.startsWith('brave://')
   );
+}
 
-  if (tabOutTabs.length <= 1) return;
+function getGroupingSiteKey(tab) {
+  const url = tab.url || '';
 
-  // Keep the active Tab Out tab in the CURRENT window — that's the one the
-  // user is looking at right now. Falls back to any active one, then the first.
-  const keep =
-    tabOutTabs.find(t => t.active && t.windowId === currentWindow.id) ||
-    tabOutTabs.find(t => t.active) ||
-    tabOutTabs[0];
-  const toClose = tabOutTabs.filter(t => t.id !== keep.id).map(t => t.id);
-  if (toClose.length > 0) await chrome.tabs.remove(toClose);
-  await fetchOpenTabs();
+  if (url.startsWith('file://')) {
+    return 'local-files';
+  }
+
+  try {
+    return new URL(url).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+function getGroupColorForKey(key) {
+  let hash = 0;
+
+  for (const char of key) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+
+  return TAB_GROUP_COLORS[hash % TAB_GROUP_COLORS.length];
+}
+
+async function groupCurrentWindowTabsBySite() {
+  if (!chrome.tabs.group || !chrome.tabs.ungroup || !chrome.tabGroups) {
+    lastGroupingSummary = { groups: 0, tabs: 0, skipped: openTabs.length };
+    return lastGroupingSummary;
+  }
+
+  const tabs = await chrome.tabs.query({ currentWindow: true });
+  const groupableTabs = tabs.filter(isGroupableTab);
+  const groupedTabIds = groupableTabs
+    .filter(tab => Number.isInteger(tab.groupId) && tab.groupId >= 0)
+    .map(tab => tab.id);
+
+  if (groupedTabIds.length > 0) {
+    await chrome.tabs.ungroup(groupedTabIds);
+  }
+
+  const groupMap = new Map();
+
+  for (const tab of groupableTabs) {
+    const siteKey = getGroupingSiteKey(tab);
+    if (!siteKey) {
+      continue;
+    }
+
+    if (!groupMap.has(siteKey)) {
+      groupMap.set(siteKey, []);
+    }
+
+    groupMap.get(siteKey).push(tab);
+  }
+
+  const orderedGroups = Array.from(groupMap.entries()).sort((left, right) => {
+    if (right[1].length !== left[1].length) {
+      return right[1].length - left[1].length;
+    }
+
+    return left[0].localeCompare(right[0]);
+  });
+
+  const repeatGroups = orderedGroups.filter(([, tabsForSite]) => tabsForSite.length > 1);
+
+  for (const [siteKey, tabsForSite] of repeatGroups) {
+    const tabIds = tabsForSite
+      .slice()
+      .sort((left, right) => left.index - right.index)
+      .map(tab => tab.id);
+
+    if (tabIds.length === 0) {
+      continue;
+    }
+
+    const groupId = await chrome.tabs.group({
+      createProperties: { windowId: tabsForSite[0].windowId },
+      tabIds,
+    });
+
+    await chrome.tabGroups.update(groupId, {
+      title: friendlyDomain(siteKey),
+      color: getGroupColorForKey(siteKey),
+      collapsed: false,
+    });
+  }
+
+  lastGroupingSummary = {
+    groups: repeatGroups.length,
+    tabs: repeatGroups.reduce((sum, [, tabsForSite]) => sum + tabsForSite.length, 0),
+    skipped: tabs.length - groupableTabs.length,
+  };
+
+  return lastGroupingSummary;
 }
 
 
@@ -440,6 +534,12 @@ function showToast(message) {
   document.getElementById('toastText').textContent = message;
   toast.classList.add('visible');
   setTimeout(() => toast.classList.remove('visible'), 2500);
+}
+
+function queueDashboardRefresh(delay = 260) {
+  window.setTimeout(() => {
+    renderDashboard();
+  }, delay);
 }
 
 /**
@@ -720,35 +820,30 @@ let domainGroups = [];
  * pages, about:blank, etc.
  */
 function getRealTabs() {
-  return openTabs.filter(t => {
-    const url = t.url || '';
-    return (
-      !url.startsWith('chrome://') &&
-      !url.startsWith('chrome-extension://') &&
-      !url.startsWith('about:') &&
-      !url.startsWith('edge://') &&
-      !url.startsWith('brave://')
-    );
-  });
+  return openTabs.filter(isGroupableTab);
 }
 
 /**
- * checkTabOutDupes()
+ * renderGroupingBanner()
  *
- * Counts how many Tab Out pages are open. If more than 1,
- * shows a banner offering to close the extras.
+ * Shows a lightweight confirmation that the current window was regrouped
+ * when the popup opened, plus a button to run the pass again.
  */
-function checkTabOutDupes() {
-  const tabOutTabs = openTabs.filter(t => t.isTabOut);
-  const banner  = document.getElementById('tabOutDupeBanner');
-  const countEl = document.getElementById('tabOutDupeCount');
+function renderGroupingBanner() {
+  const banner = document.getElementById('groupingBanner');
+  const textEl = document.getElementById('groupingBannerText');
   if (!banner) return;
 
-  if (tabOutTabs.length > 1) {
-    if (countEl) countEl.textContent = tabOutTabs.length;
+  if (lastGroupingSummary.groups > 0) {
+    if (textEl) {
+      textEl.innerHTML = `Grouped <strong>${lastGroupingSummary.tabs}</strong> tab${lastGroupingSummary.tabs !== 1 ? 's' : ''} into <strong>${lastGroupingSummary.groups}</strong> site group${lastGroupingSummary.groups !== 1 ? 's' : ''} in this window.`;
+    }
     banner.style.display = 'flex';
   } else {
-    banner.style.display = 'none';
+    if (textEl) {
+      textEl.innerHTML = 'No repeat sites to group. Single tabs stay loose.';
+    }
+    banner.style.display = 'flex';
   }
 }
 
@@ -1026,8 +1121,11 @@ async function renderStaticDashboard() {
   if (greetingEl) greetingEl.textContent = getGreeting();
   if (dateEl)     dateEl.textContent     = getDateDisplay();
 
-  // --- Fetch tabs ---
+  // --- Fetch tabs and regroup the current window by site ---
   await fetchOpenTabs();
+  await groupCurrentWindowTabsBySite();
+  await fetchOpenTabs();
+
   const realTabs = getRealTabs();
 
   // --- Group tabs by domain ---
@@ -1149,8 +1247,8 @@ async function renderStaticDashboard() {
   const openTabsSectionTitle = document.getElementById('openTabsSectionTitle');
 
   if (domainGroups.length > 0 && openTabsSection) {
-    if (openTabsSectionTitle) openTabsSectionTitle.textContent = 'Open tabs';
-    openTabsSectionCount.innerHTML = `${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''} &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button>`;
+    if (openTabsSectionTitle) openTabsSectionTitle.textContent = 'This window';
+    openTabsSectionCount.innerHTML = `${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''} · <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;margin-top:6px;">${ICONS.close} Close all ${realTabs.length} tabs</button>`;
     openTabsMissionsEl.innerHTML = domainGroups.map(g => renderDomainCard(g)).join('');
     openTabsSection.style.display = 'block';
   } else if (openTabsSection) {
@@ -1159,10 +1257,12 @@ async function renderStaticDashboard() {
 
   // --- Footer stats ---
   const statTabs = document.getElementById('statTabs');
-  if (statTabs) statTabs.textContent = openTabs.length;
+  const statGroups = document.getElementById('statGroups');
+  if (statTabs) statTabs.textContent = realTabs.length;
+  if (statGroups) statGroups.textContent = lastGroupingSummary.groups;
 
-  // --- Check for duplicate Tab Out tabs ---
-  checkTabOutDupes();
+  // --- Show grouping summary ---
+  renderGroupingBanner();
 
   // --- Render "Saved for Later" column ---
   await renderDeferredColumn();
@@ -1188,17 +1288,10 @@ document.addEventListener('click', async (e) => {
 
   const action = actionEl.dataset.action;
 
-  // ---- Close duplicate Tab Out tabs ----
-  if (action === 'close-tabout-dupes') {
-    await closeTabOutDupes();
-    playCloseSound();
-    const banner = document.getElementById('tabOutDupeBanner');
-    if (banner) {
-      banner.style.transition = 'opacity 0.4s';
-      banner.style.opacity = '0';
-      setTimeout(() => { banner.style.display = 'none'; banner.style.opacity = '1'; }, 400);
-    }
-    showToast('Closed extra Tab Out tabs');
+  // ---- Manually regroup the current window ----
+  if (action === 'group-current-window') {
+    await renderDashboard();
+    showToast('Regrouped this window');
     return;
   }
 
@@ -1228,8 +1321,8 @@ document.addEventListener('click', async (e) => {
     if (!tabUrl) return;
 
     // Close the tab in Chrome directly
-    const allTabs = await chrome.tabs.query({});
-    const match   = allTabs.find(t => t.url === tabUrl);
+    const allTabs = await chrome.tabs.query({ currentWindow: true });
+    const match   = allTabs.find(t => !t.pinned && t.url === tabUrl);
     if (match) await chrome.tabs.remove(match.id);
     await fetchOpenTabs();
 
@@ -1258,9 +1351,10 @@ document.addEventListener('click', async (e) => {
 
     // Update footer
     const statTabs = document.getElementById('statTabs');
-    if (statTabs) statTabs.textContent = openTabs.length;
+    if (statTabs) statTabs.textContent = getRealTabs().length;
 
     showToast('Tab closed');
+    queueDashboardRefresh();
     return;
   }
 
@@ -1281,8 +1375,8 @@ document.addEventListener('click', async (e) => {
     }
 
     // Close the tab in Chrome
-    const allTabs = await chrome.tabs.query({});
-    const match   = allTabs.find(t => t.url === tabUrl);
+    const allTabs = await chrome.tabs.query({ currentWindow: true });
+    const match   = allTabs.find(t => !t.pinned && t.url === tabUrl);
     if (match) await chrome.tabs.remove(match.id);
     await fetchOpenTabs();
 
@@ -1297,6 +1391,7 @@ document.addEventListener('click', async (e) => {
 
     showToast('Saved for later');
     await renderDeferredColumn();
+    queueDashboardRefresh();
     return;
   }
 
@@ -1372,7 +1467,8 @@ document.addEventListener('click', async (e) => {
     showToast(`Closed ${urls.length} tab${urls.length !== 1 ? 's' : ''} from ${groupLabel}`);
 
     const statTabs = document.getElementById('statTabs');
-    if (statTabs) statTabs.textContent = openTabs.length;
+    if (statTabs) statTabs.textContent = getRealTabs().length;
+    queueDashboardRefresh();
     return;
   }
 
@@ -1409,13 +1505,14 @@ document.addEventListener('click', async (e) => {
     }
 
     showToast('Closed duplicates, kept one copy each');
+    queueDashboardRefresh();
     return;
   }
 
   // ---- Close ALL open tabs ----
   if (action === 'close-all-open-tabs') {
     const allUrls = openTabs
-      .filter(t => t.url && !t.url.startsWith('chrome') && !t.url.startsWith('about:'))
+      .filter(isGroupableTab)
       .map(t => t.url);
     await closeTabsByUrls(allUrls);
     playCloseSound();
@@ -1429,6 +1526,7 @@ document.addEventListener('click', async (e) => {
     });
 
     showToast('All tabs closed. Fresh start.');
+    queueDashboardRefresh(320);
     return;
   }
 });

@@ -23,7 +23,7 @@
  */
 async function updateBadge() {
   try {
-    const tabs = await chrome.tabs.query({});
+    const tabs = await chrome.tabs.query({ lastFocusedWindow: true });
 
     // Only count actual web pages — skip browser internals and extension pages
     const count = tabs.filter(t => {
